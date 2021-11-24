@@ -1,0 +1,146 @@
+---
+title: "Hướng dẫn mlr3 cơ bản"
+author: "Nguyễn Ngọc Bình"
+date: "`r Sys.Date()`"
+output:
+  html_document: 
+    code_download: true
+    code_folding: show
+    number_sections: yes
+    theme: "default"
+    toc: TRUE
+    toc_float: TRUE
+    dev: 'svg'
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+```
+
+# Các bước xây dựng mô hình machine learning bằng mlr3
+
+- task: Khai báo nguồn dữ liệu đầu vào, có thể là data.frame, database 
+- learner: Khai báo thuật toán sử dụng. Ví dụ random forest, xgboost, lightgbm ...
+- search_space: Khai báo tham số cần tuning cho learner ở trên, ví dụ number of tree, mtry ...
+- measure: Khai báo tiêu chí đánh giá performance của learner. Ví dụ AUC, CE ...
+- resampling: Khai báo cách phân chia mẫu thành tập train, tập test. Ví dụ: cross validation, holdout, ...
+- tuning: lựa chọn thuật toán hay cách để tuning. Ví dụ: hyperband, grid_search ...
+
+![](ml_abstraction.svg)
+
+# Ví dụ
+
+Sử dụng thuật toán random forest để dự báo xác suất vỡ nợ của khách hàng.
+Dữ liệu đầu vào là tập german_credit.
+
+```{r, include = F}
+# load packages
+library(mlr3)
+library(mlr3learners) # for learner
+library(mlr3hyperband) # for tuning
+library(tidyverse) # data maniputation
+```
+
+## Khai báo task
+```{r}
+task_classif <- tsk('german_credit')
+task_classif
+
+```
+## Khai báo learner
+
+```{r}
+classif_learner <- lrn('classif.ranger')
+classif_learner
+
+# chọn loại dự báo
+classif_learner$predict_type <- "prob"
+```
+
+
+## Khai báo tham số cần tunning
+
+- Trước khi khai báo tham số cần tuning nên kiểm tra xem learner hỗ trợ những tham số nào và tham số đấy định dạng factor, hay numeric ... để khai báo cho phù hợp
+```{r}
+classif_learner$param_set %>% 
+  as.data.table() %>% 
+  select(id,	class,	lower,	upper,	levels) %>% 
+  kable()
+```
+
+- Lựa chọn tham số 
+```{r}
+ps_ranger = ps(
+    num.trees = p_int(300, 800, tags = "budget"),
+    mtry = p_int(8, 15),
+    sample.fraction = p_dbl(0.7, 0.8)
+  )
+```
+
+## Khai báo resampling
+
+```{r}
+# cross-validation with 5 folds
+resampling_inner = rsmp("cv", folds = 5)
+resampling_inner 
+```
+
+## Khai báo metric
+```{r}
+measure = msr("classif.auc")
+measure
+```
+
+
+## Khai báo thuật toán tunning
+
+```{r}
+tuner = tnr("hyperband", eta = 2)
+tuner
+```
+
+## Thực hiện tunning
+
+### Khai báo object để tuning
+```{r}
+tune_single_crit = TuningInstanceSingleCrit$new(
+      task = task_classif,
+      learner = classif_learner,
+      resampling = resampling_inner,
+      measure = measure,
+      terminator = trm("none"), # hyperband terminates itself
+      search_space = ps_ranger
+    )
+tune_single_crit
+```
+
+### Tunning
+
+```{r, include=F}
+# not show
+tuner$optimize(tune_single_crit)
+```
+
+- Kết quả tunning
+```{r}
+tune_single_crit$archive
+```
+
+- Dự báo
+
+Áp tham số tốt nhất để training trên toán tập dữ liệu
+```{r}
+tuned_learner <- classif_learner$clone()
+tuned_learner$param_set$values = tune_single_crit$result_learner_param_vals # best paramters
+tuned_learner$train(task_classif)
+
+```
+
+Kết quả dự báo
+```{r}
+tuned_learner$predict(task_classif)
+```
+
