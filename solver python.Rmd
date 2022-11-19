@@ -1,0 +1,292 @@
+---
+title: 'Solver excel in python, a small practice: Fit distribution'
+author: "Nguyễn Ngọc Bình"
+date: "2022-11-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+# 1 Giới thiệu
+
+Excel có 2 công cụ tuyệt vời là solver và goal seek. Với những dự án nhỏ, hoặc dữ liệu nhỏ, mô hình ít thì 2 công cụ này cũng đủ dùng. Nhưng khi dữ liệu nhiều, số lượng mô hình tăng, excel không còn phù hợp. Có nhiều công cụ thay thế excel giải quyết những vẫn đề này, trong đó có `python` là 1 công cụ rất mạnh.
+
+# 2 Thực hành
+
+Trong phần này tôi sử dụng hàm `optimize` của gói `scipy`. Các bước như sau:
+
+## Bước 1: Viết `class` sử dụng cho mục đích tối ưu. Class này bao gồm 4 hàm:
+
+- `func`: Hàm cần tối ưu.
+
+- `sse`: Tổng sai số bình phương. Càng gần 0 càng tốt.
+
+- `solver`: Tối ưu tham số cho hàm `func`.
+
+- `predict`: Xuất kết quả nội suy dựa trên các tham số đã tối ưu từ hàm solver
+
+
+
+## Bước 2: Sử dụng 5 dạng hàm
+
+- gamma
+
+- exponential
+
+- cauchy
+
+- log-logistic
+
+- log-normal
+
+### Import các thư viện cần dùng
+
+```{python}
+import numpy as np
+import pandas as pd
+import scipy  
+from scipy import stats 
+import scipy.optimize as optimize
+```
+
+### 1. Các hàm liên quan
+
+#### 1.1 Hàm phân phối gamma
+
+```{python}
+class opt_gamma():
+    def __init__(self, actual_pd):
+        self.actual_pd = actual_pd
+        self.x_input = range(1,5)
+    def func(self, x, scale, a, b):        
+        predict = stats.gamma.pdf(x, a = a, scale = b) * scale
+        return predict
+    def sse(self, params, xobs, yobs):
+        ynew = self.func(xobs, *params)
+        sse = np.sum((ynew - yobs) ** 2)        
+        return sse
+    def solver(self):
+        p0 = [1,1,1]
+        bounds = [(0.0001, 2), (0.0001, 10), (0.0001, 10)]
+        res = scipy.optimize.minimize(self.sse, p0, args=(self.x_input, self.actual_pd), bounds= bounds)        
+        # res = scipy.optimize.minimize(self.sse, p0, args=(self.x_input, self.actual_pd), method='Nelder-Mead')        
+        return res
+    def predict(self, t):
+        res = self.solver()
+        ypred = self.func(range(1, t+1), *res.x)        
+        return ypred    
+```
+
+### 1.2 Hàm Phân phối mũ Exponential
+
+```{python}
+class opt_exponential:
+    def __init__(self, actual_pd):
+        self.actual_pd = actual_pd
+        self.x_input = range(1,5)
+    def func(self, x, scale, a):        
+        # change function here        
+        pred = stats.expon.pdf(x, scale = 1/a) * scale
+        return pred
+    def sse(self, params, xobs, yobs):
+        ynew = self.func(xobs, *params)
+        mse = np.sum((ynew - yobs) ** 2)        
+        return mse
+    def solver(self):
+        # change initial guess here
+        p0 = [1,2]
+        bounds = [(0.0001, 2), (0.0001, 0.5)]           
+        res = scipy.optimize.minimize(self.sse, p0, args=(self.x_input, self.actual_pd), bounds = bounds)             
+        return res
+    def predict(self, t=30):
+        res = self.solver()
+        ypred = self.func(range(1, t+1), *res.x)        
+        return ypred       
+```
+
+
+### 1.3 Hàm phân phối Cauchy
+
+```{python}
+class opt_cauchy:
+    def __init__(self, actual_pd):
+        self.actual_pd = actual_pd
+        self.x_input = range(1,5)
+    def func(self, x, scale, a, b):        
+        # change function here        
+        predict = stats.cauchy.pdf(x, loc = b, scale = a) * scale
+        return predict
+    def sse(self, params, xobs, yobs):
+        ynew = self.func(xobs, *params)
+        mse = np.sum((ynew - yobs) ** 2)        
+        return mse
+    def solver(self):
+        # change initial guess here
+        p0 = [1,1,1]
+        bounds = [(0.0001, 2), (0.0001, 15), (-30, 30)]
+        res = scipy.optimize.minimize(self.sse, p0, args=(self.x_input, self.actual_pd), bounds = bounds)        
+        return res
+    def predict(self, t=30):
+        res = self.solver()
+        ypred = self.func(range(1, t+1), *res.x)        
+        return ypred    
+```
+
+### 1.4 Hàm phân phối log logistic
+
+```{python}
+class opt_log_logistic:
+    def __init__(self, actual_pd):
+        self.actual_pd = actual_pd
+        self.x_input = range(1,5)
+    def func(self, x, scale, a, b):        
+        # change function here
+        predict = scale*(a/b)*(x/b)**(a-1)/(1+(x/b)**a)**2
+        return predict
+    def sse(self, params, xobs, yobs):
+        ynew = self.func(xobs, *params)
+        mse = np.sum((ynew - yobs) ** 2)        
+        return mse
+    def solver(self):
+        # change initial guess here
+        p0 = [2,3,1]
+        bounds = [(0.0001, 2), (0.0001, 10), (0.0001, 10)]
+        res = scipy.optimize.minimize(self.sse, p0, args=(self.x_input, self.actual_pd), bounds=bounds)        
+        return res
+    def predict(self, t=30):
+        res = self.solver()
+        ypred = self.func(range(1, t+1), *res.x)        
+        return ypred    
+```
+
+### 1.5 Hàm phân phối log normal
+
+```{python}
+class opt_log_normal:
+    def __init__(self, actual_pd):
+        self.actual_pd = actual_pd
+        self.x_input = range(1,5)
+    def func(self, x, scale, a, b):        
+        # change function here
+        predict = (np.exp(-(np.log(x) - a)**2 / (2 * b**2)) / (x * b * np.sqrt(2 * np.pi)))*scale
+        return predict
+    def sse(self, params, xobs, yobs):
+        ynew = self.func(xobs, *params)
+        mse = np.sum((ynew - yobs) ** 2)        
+        return mse
+    def solver(self):
+        # change initial guess here
+        p0 = [1,1,1]
+        bounds = [(0.0001, 2), (0.0001, 0.5), (0.0001, 0.5)]
+        res = scipy.optimize.minimize(self.sse, p0, args=(self.x_input, self.actual_pd), bounds=bounds)        
+        return res
+    def predict(self, t=30):
+        res = self.solver()
+        ypred = self.func(range(1, t+1), *res.x)        
+        return ypred    
+```
+
+## 2. Fit models
+
+### 2.1 Đặt giá trị initial
+
+- Gamma = 1,1,1
+
+- Cauchy = 1,1,1
+
+- Expo = 1,2
+
+- Log Logistic = 2,3,1
+
+- Log Normal = 1,1,1
+
+### 2.2 Example data
+
+```{python}
+
+data = pd.DataFrame({
+  'segment_pool_group': ['A','B'],
+  'Y1':[0.015243, 0.511198],
+  'Y2':[0.025249, 0.058478],
+  'Y3':[0.015204, 0.013153],
+  'Y4':[0.006288, 0.001244]
+})
+
+data
+```
+
+
+
+### 2.3 Fit models
+
+```{python}
+fitted = opt_exponential(data.iloc[0,1:])
+fitted.predict(10)
+```
+
+
+
+```{python}
+
+def fn_export_by_segment(segment, period):
+    segment = segment.upper()
+    actual_pd = data[data.segment_pool_group.isin([segment])]
+    actual_pd = actual_pd.iloc[0, 1:]
+    actual_pd = actual_pd.values
+    res_gamma = opt_gamma(actual_pd)
+    res_exponential = opt_exponential(actual_pd)
+    res_cauchy = opt_cauchy(actual_pd)
+    res_log_logistic = opt_log_logistic(actual_pd)
+    res_log_normal = opt_log_normal(actual_pd)
+    params = pd.DataFrame({
+        'Segment': segment,
+        'Distribution': ['Gamma', 'Exponential', 'Cauchy', 'Log-logistic', 'Log-normal'],
+        'SSE': [res_gamma.solver().fun, res_exponential.solver().fun, res_cauchy.solver().fun, res_log_logistic.solver().fun, res_log_normal.solver().fun],
+        'params': [res_gamma.solver().x, res_exponential.solver().x, res_cauchy.solver().x, res_log_logistic.solver().x, res_log_normal.solver().x]
+    })
+    params[['scale', 'a', 'b']] = pd.DataFrame(params.params.to_list())    
+    del params['params']
+    dict_predict = {
+            'Segment': segment,
+            'Period': range(1, period+1),
+            'Gamma': res_gamma.predict(period),
+            'Exponential': res_exponential.predict(period),
+            'Cauchy': res_cauchy.predict(period),
+            'Log-logistic': res_log_logistic.predict(period),
+            'Log-normal': res_log_normal.predict(period)
+        }
+    best_distribution = params.sort_values('SSE').head(1)        
+    best_distribution = best_distribution['Distribution'].item()
+    df_best_fit = pd.DataFrame(
+        {'Segment': segment,
+        'Period': range(1, period+1),
+        'PIT PD': dict_predict[best_distribution]
+        }
+    ) 
+    print('Best distribution of ' + segment + ' is '+ best_distribution)
+    return params, df_best_fit
+```
+
+
+```{python}
+cohort_frame = []
+params_frame = []
+for seg in data.segment_pool_group:
+    params, df = fn_export_by_segment(seg, 10)
+    cohort_frame.append(df)
+    params_frame.append(params)
+cohort_frame = pd.concat(cohort_frame, axis=0)
+params_frame = pd.concat(params_frame, axis=0)
+```
+
+```{python}
+cohort_frame
+```
+
+
+```{python}
+params_frame
+```
